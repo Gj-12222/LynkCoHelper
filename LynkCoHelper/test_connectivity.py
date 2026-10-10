@@ -37,6 +37,12 @@ PROBE_RT = "bearer00000000-0000-0000-0000-000000000000"
 SIG_ERROR_KEYWORDS = ("signature", "appkey", "appcode", "unauthorized",
                       "forbidden", "signatureheaders", "签名", "鉴权", "未授权")
 
+# 业务层错误码：网关已放行（说明签名通过），只是 token/账号层面无效。
+# 探针故意传无效 refreshToken，命中这一类即代表验证成功。
+BUSINESS_ERROR_KEYWORDS = ("user_", "token", "expired", "invalid",
+                           "not_login", "notlogin", "not_found",
+                      "未登录", "过期", "无效")
+
 
 def mask_value(v: str) -> str:
     if not v:
@@ -100,14 +106,24 @@ def layer_c_gateway(key, secret):
     print(f"      message = {message[:120] or '(无)'}")
 
     low = (code + " " + message).lower()
+
+    # 1) 网关层错误：签名/鉴权没过，请求根本没进业务
     if any(k in low for k in SIG_ERROR_KEYWORDS):
         print("\n>>> 结论：网络可达，但密钥无效/未授权 ⚠️")
         print("    处理：重跑 extract-appsecret 拿最新密钥。")
         return EXIT_BADKEY
 
-    print("\n>>> 结论：网络可达 + 签名体系通过 ✅")
-    print("    可以放心继续：抓包拿真 refreshToken，再挂定时任务。")
-    return EXIT_OK
+    # 2) 业务层错误码：说明网关已放行、签名被接受，只是 token 本身无效
+    #    （探针故意用无效 refreshToken，报业务错属预期）
+    if any(k in low for k in BUSINESS_ERROR_KEYWORDS):
+        print("\n>>> 结论：网络可达 + 签名体系通过 ✅")
+        print("    网关认了签名，返回的是业务错误码（refreshToken 无效是探针故意的）。")
+        print("    下一步：iPhone 抓包拿真 refreshToken 和 deviceId。")
+        return EXIT_OK
+
+    print("\n>>> 结论：返回了 JSON，但错误码未归类，请把上面日志发我判断。")
+    print(f"    code = {code}")
+    return EXIT_BLOCKED
 
 
 def main():
