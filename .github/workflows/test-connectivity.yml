@@ -1,0 +1,44 @@
+name: test-connectivity
+
+# 连通性探针：在投入精力抓包之前，先确认 GitHub 托管 runner（境外 IP）
+# 能不能连上领克网关、签名密钥是否有效。
+#
+# 只需要 1 个 Secret：LYNKCO_APP_SECRETS
+#   {"nativeAppKey":"...","nativeAppSecret":"..."}
+# 不需要 refreshToken —— 探针故意用无效 token，只看网关怎么回。
+#
+# 如何判断结果（看日志末尾的「>>> 结论」）：
+#   ✅ 网络可达 + 签名体系通过  -> 继续抓包，然后挂定时任务
+#   ⚠️ 网络可达，但密钥无效      -> 重跑 extract-appsecret 取最新密钥
+#   ❌ 网络层被拦截              -> 改用本地 Windows 定时跑
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r LynkCoHelper/requirements.txt
+
+      - name: 运行连通性探针
+        env:
+          LYNKCO_APP_SECRETS: ${{ secrets.LYNKCO_APP_SECRETS }}
+          # 探针不使用真实 token，这里留空即可
+          LYNKCO_REFRESH_TOKEN: ""
+          LYNKCO_DEVICE_ID: ""
+          LYNKCO_TIMEOUT: "30"
+        run: |
+          cd LynkCoHelper
+          python3 test_connectivity.py
+          echo "probe_exit=$?"
