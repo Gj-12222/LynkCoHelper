@@ -1,0 +1,49 @@
+# 保活工作流：防止 GitHub 自动停用定时任务
+#
+# 为什么需要它（GitHub 官方规则，docs.github.com 原文）：
+#   "When a public repository is forked, scheduled workflows are disabled by default."
+#   "In a public repository, scheduled workflows are automatically disabled
+#    when no repository activity has occurred in 60 days."
+#
+# 两条要分清楚：
+#   ① fork 的定时任务默认停用  → 只需在 Actions 页面点一次「Enable workflow」，两种可见性都适用
+#   ② 60 天无活动自动停用      → **只对公开仓库生效**
+#
+# 所以：
+#   - 你的 fork 是 Private → **不需要本文件**，删掉即可。私有仓库不受 60 天规则约束。
+#   - 你的 fork 是 Public  → 需要它。
+#
+# 注意「活动」的定义很窄：只有 push/commit 算，issue、PR、评论都不算，
+# 而且**定时任务自己跑起来不算活动**。所以一个只靠 cron 心跳的公开仓库，
+# 必然在第 60 天被静默停用——并且不会有任何邮件或失败记录。
+#
+# 原理：每周做一次空提交，把仓库"最近活动"的时钟重置。
+# [skip ci] 提交信息可以避免这次提交反过来触发其它 push 工作流。
+#
+# 排查当前是否已被停用：
+#   Actions → 左侧点 LynkCoHelperRunner → 若页面顶部有 Enable workflow 按钮，就是被停用了。
+
+name: Keepalive
+
+on:
+  schedule:
+    # 每周日 UTC 4:00（北京时间 12:00），避开签到任务的 8:00
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Push empty commit to reset activity clock
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: scheduled keepalive [skip ci]"
+          git push
